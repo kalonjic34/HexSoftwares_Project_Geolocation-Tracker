@@ -2,7 +2,7 @@ import requests
 import sys
 import csv
 from pathlib import Path
-from typing import Optional
+import webbrowser
 
 IP_API = "https://api.ipify.org?format=json"
 GEO_API = "https://ipapi.co/{ip}/json/"
@@ -31,6 +31,7 @@ def normalize_row(ip: str, geo: dict) -> dict:
     }
 
 def save_csv(row: dict, path: Path):
+    import csv
     write_header = not path.exists()
     with path.open("a", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=list(row.keys()))
@@ -38,34 +39,46 @@ def save_csv(row: dict, path: Path):
             w.writeheader()
         w.writerow(row)
 
-def format_geo(row: dict) -> str:
-    loc = ", ".join([p for p in [row["city"], row["region"], row["country"]]if p])
+def make_map(lat: float, lon: float, label: str, outfile: Path) -> Path:
+    try:
+        import folium
+    except ImportError:
+        raise SystemExit("folium not installed. Run: pip install folium")
+
+    m = folium.Map(location=[lat, lon], zoom_start=12, tiles="OpenStreetMap")
+    folium.Marker([lat, lon], tooltip="Location", popup=label).add_to(m)
+    m.save(outfile.as_posix())
+    return outfile
+
+def print_row(row: dict):
+    loc = ", ".join([p for p in [row["city"], row["region"], row["country"]] if p])
     coords = f"{row['latitude']}, {row['longitude']}" if row["latitude"] is not None and row["longitude"] is not None else "Unknown"
-    lines = [
-        f"IP: {row['ip']}",
-        f"Location: {loc or 'Unknown'}",
-        f"Coordinates: {coords}",
-    ]
+    print(f"IP: {row['ip']}")
+    print(f"Location: {loc or 'Unknown'}")
+    print(f"Coordinates: {coords}")
     if row["org"]:
-        lines.append(f"ISP/Org: {row['org']}")
+        print(f"ISP/Org: {row['org']}")
     if row["timezone"]:
-        lines.append(f"Timezone: {row['timezone']}")
+        print(f"Timezone: {row['timezone']}")
     if row["postal"]:
-        lines.append(f"Postal: {row['postal']}")
-    return "\n".join(lines)
+        print(f"Postal: {row['postal']}")
 
 def main():
     try:
-        ip = sys.argv[1] if len(sys.argv)>1 else get_public_ip()
-        csv_path: Optional[Path] = Path(sys.argv[2]) if len(sys.argv)> 2 else None
-
+        ip = sys.argv[1] if len(sys.argv) > 1 else get_public_ip()
         geo = get_geo(ip)
         row = normalize_row(ip, geo)
-        print(format_geo(row))
+        print_row(row)
 
-        if csv_path:
-            save_csv(row, csv_path)
-            print(f"Saved to {csv_path.resolve()}")
+        lat, lon = row["latitude"], row["longitude"]
+        if lat is not None and lon is not None:
+            outfile = Path("map.html")
+            label = f"{row['ip']} — {', '.join([p for p in [row['city'], row['region'], row['country']] if p])}"
+            make_map(float(lat), float(lon), label, outfile)
+            print(f"Saved map to {outfile.resolve()}")
+            webbrowser.open(outfile.resolve().as_uri())
+        else:
+            print("No coordinates available; map not created.")
     except requests.HTTPError as e:
         print(f"HTTP error: {e}")
         sys.exit(1)
