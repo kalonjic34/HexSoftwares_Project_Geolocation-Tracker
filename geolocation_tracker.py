@@ -1,6 +1,6 @@
-import requests
 import sys
-import csv
+import requests
+import argparse
 from pathlib import Path
 import webbrowser
 
@@ -44,7 +44,6 @@ def make_map(lat: float, lon: float, label: str, outfile: Path) -> Path:
         import folium
     except ImportError:
         raise SystemExit("folium not installed. Run: pip install folium")
-
     m = folium.Map(location=[lat, lon], zoom_start=12, tiles="OpenStreetMap")
     folium.Marker([lat, lon], tooltip="Location", popup=label).add_to(m)
     m.save(outfile.as_posix())
@@ -63,21 +62,33 @@ def print_row(row: dict):
     if row["postal"]:
         print(f"Postal: {row['postal']}")
 
-def main():
+def parse_args(argv):
+    p = argparse.ArgumentParser(description="Geolocation Tracker (IP-based)")
+    p.add_argument("ip", nargs="?", help="IP address to look up (default: your public IP)")
+    p.add_argument("--csv", metavar="PATH", help="Append result to CSV file")
+    p.add_argument("--no-map", action="store_true", help="Do not generate/open map")
+    return p.parse_args(argv)
+
+def main(argv=None):
+    args = parse_args(argv or sys.argv[1:])
     try:
-        ip = sys.argv[1] if len(sys.argv) > 1 else get_public_ip()
+        ip = args.ip or get_public_ip()
         geo = get_geo(ip)
         row = normalize_row(ip, geo)
         print_row(row)
 
+        if args.csv:
+            save_csv(row, Path(args.csv))
+            print(f"Saved CSV to {Path(args.csv).resolve()}")
+
         lat, lon = row["latitude"], row["longitude"]
-        if lat is not None and lon is not None:
+        if not args.no_map and lat is not None and lon is not None:
             outfile = Path("map.html")
             label = f"{row['ip']} — {', '.join([p for p in [row['city'], row['region'], row['country']] if p])}"
             make_map(float(lat), float(lon), label, outfile)
             print(f"Saved map to {outfile.resolve()}")
             webbrowser.open(outfile.resolve().as_uri())
-        else:
+        elif not args.no_map:
             print("No coordinates available; map not created.")
     except requests.HTTPError as e:
         print(f"HTTP error: {e}")
